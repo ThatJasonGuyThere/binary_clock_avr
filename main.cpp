@@ -26,10 +26,12 @@
 #include <util/delay.h>
 
 void init();
+void LED_on_hours(uint8_t h);
 static volatile uint8_t second, minute, hour;
 static volatile uint8_t second_ones, second_tens, minute_ones, minute_tens;
 static volatile bool clockSet = false;
-unsigned char state, pinstate;
+unsigned char pinstate, state;
+
 
 const unsigned char ttable[7][4] = {
 	// R_START
@@ -56,7 +58,7 @@ int main(void)
     {
 		// Enter sleep mode.
 		// Will wake from timer overflow interrupt
-		// sleep_mode();
+		sleep_mode();
 
 		/*The MCU should always be awake for a minimum of one
 		 * TOSC cycle, before re-entering sleep mode. Otherwise,
@@ -67,22 +69,45 @@ int main(void)
 		 * has been updated, before going to sleep*/
 			
 		/* Dummy write the desired pre-scaler */
-		// TCCR2 |= ((1 << CS20) | (0 << CS21) | (1 << CS22));
+		TCCR2 |= ((1 << CS20) | (0 << CS21) | (1 << CS22));
 
 		// Wait until TC2 is updated
-		// while (ASSR & ((1 << TCN2UB) | (1 << OCR2UB) | (1 << TCR2UB))) {}
+		while (ASSR & ((1 << TCN2UB) | (1 << OCR2UB) | (1 << TCR2UB))) {}
 		
 		// Encoder position
 		// Disable TOV2 for now
 
 		// Grab state of input pins.
-		pinstate = (!(BIT_TST(PINC, 1, 1)) << 1) | !(BIT_TST(PINC, 0, 1));
-		// Determine new state from the pins and state table.
-		state = ttable[state & 0xf][pinstate];
-		if (state & 0x30) {
-			((state & 0x30) == DIR_CW) ? PORTB ^= 0x0F : (PORTB ^= 0xF0);
-		}
 		
+		while (clockSet) {
+			pinstate = (!(BIT_TST(PINC, 1, 1)) << 1) | !(BIT_TST(PINC, 0, 1));
+			// Determine new state from the pins and state table.
+			state = ttable[state & 0xf][pinstate];
+			if (state & 0x30) {
+				//((state & 0x30) == DIR_CW) ? minute-- : minute++;
+				if ((state & 0x30) == DIR_CW) {
+					if (minute == 00) {
+						minute = 59;
+						if (hour == 0) {
+							hour = 23;
+						} else	hour--;
+					} else minute--;
+				} else {
+					minute++;
+					if (minute == 60) {
+						minute = 0;
+						hour++;
+						if (hour == 24) hour = 0;
+					}				
+				}
+			}
+		
+			minute_ones = minute % 10;
+			minute_tens = minute / 10;
+			PORTB = ((minute_ones << 0) | (minute_tens << 4));
+
+			LED_on_hours((hour));
+		}
     }
 }
 
@@ -101,7 +126,7 @@ void init(void) {
 
 	// Activate pull up resistors
 	PORTC = 0x00;
-	PORTD = 0b00000000;
+	PORTD = 0b00001111;
 
 	// Wait for external clock crystal to stabilize
 	for (uint8_t i = 0; i < 0x40; i++) {
@@ -142,17 +167,21 @@ void init(void) {
 	sei();
 
 	// Setting the sleep mode to be used to power save mode
-	// set_sleep_mode(SLEEP_MODE_PWR_SAVE);
+	set_sleep_mode(SLEEP_MODE_PWR_SAVE);
 
 	// Enable sleep mode
-	// sleep_enable();
+	sleep_enable();
+}
+
+void LED_on_hours(uint8_t h) {
+
+		if (h == 0) PORTD = ((12 << 4) | (15 << 0));
+		else if (h > 12) PORTD = (((h-12) << 4) | (15 << 0));
+		else PORTD = ((h << 4) | (15 << 0));
+
 }
 
 ISR(TIMER2_OVF_vect) {
-	
-	// PORTA ^= 0xFF;
-	// PORTB ^= 0xFF;	
-	// PORTD ^= 0b11110000;
 
 	second++;
 	if (second == 60) {
@@ -177,16 +206,14 @@ ISR(TIMER2_OVF_vect) {
 	PORTA = ((second_ones << 0) | (second_tens << 4));
 	PORTB = ((minute_ones << 0) | (minute_tens << 4));
 	
-	if (hour == 0) PORTD = ((12 << 4) | (15 << 0));
-	else if (hour > 12) PORTD = (((hour-12) << 4) | (15 << 0));
-	else PORTD = ((hour << 4) | (15 << 0));	
+	LED_on_hours(hour);
 	
 }
 
 ISR(INT0_vect) {
-
-	// Enable adjust minutes and hours
 	// Toggle boolean
-	clockSet = !clockSet;
-	
+	GICR = (0 << INT0); 
+	clockSet = !clockSet;	
+	_delay_ms(1000); //Wait for button to reset to neutral before enabling INT0
+	GICR |= (1 << INT0); //Turn interrupt flag on - counters debouncing
 }
