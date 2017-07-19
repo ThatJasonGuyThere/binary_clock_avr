@@ -6,10 +6,19 @@
  */ 
 
 #define F_CPU 1000000UL
-#define _A 0x1B
-#define _B 0x18
-#define _C 0x15
-#define _D 0x12
+
+#define BIT_TST(REG, bit, val)			( (REG & (1UL << (bit) ) ) == ((val) << (bit)) )
+
+#define DIR_NON 0x0
+#define DIR_CW 0x10
+#define DIR_CCW 0x20
+#define R_START 0x00
+#define R_CW_FINAL 0x1
+#define R_CW_BEGIN 0x2
+#define R_CW_NEXT 0x3
+#define R_CCW_BEGIN 0x4
+#define R_CCW_FINAL 0x5
+#define R_CCW_NEXT 0x6
 
 #include <avr/io.h>
 #include <avr/interrupt.h>
@@ -19,6 +28,25 @@
 void init();
 static volatile uint8_t second, minute, hour;
 static volatile uint8_t second_ones, second_tens, minute_ones, minute_tens;
+static volatile bool clockSet = false;
+unsigned char state, pinstate;
+
+const unsigned char ttable[7][4] = {
+	// R_START
+	{R_START,    R_CW_BEGIN,  R_CCW_BEGIN, R_START},
+	// R_CW_FINAL
+	{R_CW_NEXT,  R_START,     R_CW_FINAL,  R_START | DIR_CW},
+	// R_CW_BEGIN
+	{R_CW_NEXT,  R_CW_BEGIN,  R_START,     R_START},
+	// R_CW_NEXT
+	{R_CW_NEXT,  R_CW_BEGIN,  R_CW_FINAL,  R_START},
+	// R_CCW_BEGIN
+	{R_CCW_NEXT, R_START,     R_CCW_BEGIN, R_START},
+	// R_CCW_FINAL
+	{R_CCW_NEXT, R_CCW_FINAL, R_START,     R_START | DIR_CCW},
+	// R_CCW_NEXT
+	{R_CCW_NEXT, R_CCW_FINAL, R_CCW_BEGIN, R_START},
+};
 
 int main(void)
 {	
@@ -28,7 +56,7 @@ int main(void)
     {
 		// Enter sleep mode.
 		// Will wake from timer overflow interrupt
-		sleep_mode();
+		// sleep_mode();
 
 		/*The MCU should always be awake for a minimum of one
 		 * TOSC cycle, before re-entering sleep mode. Otherwise,
@@ -37,29 +65,43 @@ int main(void)
 		 * this by doing a dummy write to the TCCR2B register
 		 * and waiting until the ASSR register reports that TC2
 		 * has been updated, before going to sleep*/
-
+			
 		/* Dummy write the desired pre-scaler */
-		TCCR2 |= ((1 << CS20) | (0 << CS21) | (1 << CS22));
+		// TCCR2 |= ((1 << CS20) | (0 << CS21) | (1 << CS22));
 
 		// Wait until TC2 is updated
-		while (ASSR & ((1 << TCN2UB) | (1 << OCR2UB) | (1 << TCR2UB))) {}
+		// while (ASSR & ((1 << TCN2UB) | (1 << OCR2UB) | (1 << TCR2UB))) {}
+		
+		// Encoder position
+		// Disable TOV2 for now
+
+		// Grab state of input pins.
+		pinstate = (!(BIT_TST(PINC, 1, 1)) << 1) | !(BIT_TST(PINC, 0, 1));
+		// Determine new state from the pins and state table.
+		state = ttable[state & 0xf][pinstate];
+		if (state & 0x30) {
+			((state & 0x30) == DIR_CW) ? PORTB ^= 0x0F : (PORTB ^= 0xF0);
+		}
+		
     }
 }
 
 void init(void) {
 	
+	state = R_START;
+
 	second = 0;
 	minute = 0;
 	hour = 0;
 
 	DDRA = 0b11111111;
 	DDRB = 0b00111111;
-	DDRC = 0x00;;
+	DDRC = 0x00;
 	DDRD = 0b11110000;
 
 	// Activate pull up resistors
-	PORTC = 0xFF;
-	PORTD = 0b00001111;
+	PORTC = 0x00;
+	PORTD = 0b00000000;
 
 	// Wait for external clock crystal to stabilize
 	for (uint8_t i = 0; i < 0x40; i++) {
@@ -73,7 +115,7 @@ void init(void) {
 	// Make sure all TC0 interrupts are disabled
 	TIMSK = 0x00;
 
-	// set Timer/counter2 to be asynch from the CPU clock
+	// set Timer/counter2 to be async from the CPU clock
 	// This will clock TC2 from the external 32,768 kHz crystal
 	ASSR |= (1 << AS2);
 	
@@ -100,10 +142,10 @@ void init(void) {
 	sei();
 
 	// Setting the sleep mode to be used to power save mode
-	set_sleep_mode(SLEEP_MODE_PWR_SAVE);
+	// set_sleep_mode(SLEEP_MODE_PWR_SAVE);
 
 	// Enable sleep mode
-	sleep_enable();
+	// sleep_enable();
 }
 
 ISR(TIMER2_OVF_vect) {
@@ -144,13 +186,7 @@ ISR(TIMER2_OVF_vect) {
 ISR(INT0_vect) {
 
 	// Enable adjust minutes and hours
-
-
-	PORTB = 0x00;
-
-	for (int i = 0; i < 5 ; i ++) {		
-		PORTB ^= 0b01111111;
-		_delay_ms(500);
-	}
+	// Toggle boolean
+	clockSet = !clockSet;
 	
 }
