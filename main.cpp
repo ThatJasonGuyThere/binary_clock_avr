@@ -9,46 +9,18 @@
 
 #define BIT_TST(REG, bit, val)			( (REG & (1UL << (bit) ) ) == ((val) << (bit)) )
 
-#define DIR_NON 0x0
-#define DIR_CW 0x10
-#define DIR_CCW 0x20
-#define R_START 0x00
-#define R_CW_FINAL 0x1
-#define R_CW_BEGIN 0x2
-#define R_CW_NEXT 0x3
-#define R_CCW_BEGIN 0x4
-#define R_CCW_FINAL 0x5
-#define R_CCW_NEXT 0x6
-
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <avr/sleep.h>
 #include <util/delay.h>
+#include "Rotary.h"
 
 void init();
 void LED_on_hours(uint8_t h);
 static volatile uint8_t second, minute, hour;
 static volatile uint8_t second_ones, second_tens, minute_ones, minute_tens;
 static volatile bool clockSet = false;
-unsigned char pinstate, state;
-
-
-const unsigned char ttable[7][4] = {
-	// R_START
-	{R_START,    R_CW_BEGIN,  R_CCW_BEGIN, R_START},
-	// R_CW_FINAL
-	{R_CW_NEXT,  R_START,     R_CW_FINAL,  R_START | DIR_CW},
-	// R_CW_BEGIN
-	{R_CW_NEXT,  R_CW_BEGIN,  R_START,     R_START},
-	// R_CW_NEXT
-	{R_CW_NEXT,  R_CW_BEGIN,  R_CW_FINAL,  R_START},
-	// R_CCW_BEGIN
-	{R_CCW_NEXT, R_START,     R_CCW_BEGIN, R_START},
-	// R_CCW_FINAL
-	{R_CCW_NEXT, R_CCW_FINAL, R_START,     R_START | DIR_CCW},
-	// R_CCW_NEXT
-	{R_CCW_NEXT, R_CCW_FINAL, R_CCW_BEGIN, R_START},
-};
+Rotary rotaryStep = Rotary();
 
 int main(void)
 {	
@@ -78,14 +50,12 @@ int main(void)
 		// Disable TOV2 for now
 
 		// Grab state of input pins.
-		
+		// &PINC
+
 		while (clockSet) {
-			pinstate = (!(BIT_TST(PINC, 1, 1)) << 1) | !(BIT_TST(PINC, 0, 1));
-			// Determine new state from the pins and state table.
-			state = ttable[state & 0xf][pinstate];
-			if (state & 0x30) {
-				//((state & 0x30) == DIR_CW) ? minute-- : minute++;
-				if ((state & 0x30) == DIR_CW) {
+			unsigned char rotaryResult = rotaryStep.process(&PINC);
+			if (rotaryResult) {
+				if ((rotaryResult) == DIR_CW) {
 					if (minute == 00) {
 						minute = 59;
 						if (hour == 0) {
@@ -113,8 +83,6 @@ int main(void)
 
 void init(void) {
 	
-	state = R_START;
-
 	second = 0;
 	minute = 0;
 	hour = 0;
@@ -214,6 +182,6 @@ ISR(INT0_vect) {
 	// Toggle boolean
 	GICR = (0 << INT0); 
 	clockSet = !clockSet;	
-	_delay_ms(1000); //Wait for button to reset to neutral before enabling INT0
+	_delay_ms(500); //Wait for button to reset to neutral before enabling INT0, can change to while loop
 	GICR |= (1 << INT0); //Turn interrupt flag on - counters debouncing
 }
