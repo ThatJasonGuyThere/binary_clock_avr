@@ -46,12 +46,6 @@ int main(void)
 		// Wait until TC2 is updated
 		while (ASSR & ((1 << TCN2UB) | (1 << OCR2UB) | (1 << TCR2UB))) {}
 		
-		// Encoder position
-		// Disable TOV2 for now
-
-		// Grab state of input pins.
-		// &PINC
-
 		while (clockSet) {
 			unsigned char rotaryResult = rotaryStep.process(&PINC);
 			if (rotaryResult) {
@@ -163,17 +157,8 @@ ISR(TIMER2_OVF_vect) {
 			}
 		}
 	}
-	
-	second_ones = second % 10; //1s
-	second_tens = second / 10; //10s
 
-	minute_ones = minute % 10;
-	minute_tens = minute / 10;
-	
-	// Bit-shift magic :)
-	PORTA = ((second_ones << 0) | (second_tens << 4));
-	PORTB = ((minute_ones << 0) | (minute_tens << 4));
-	
+	PORTB = minute;	
 	LED_on_hours(hour);
 	
 }
@@ -182,6 +167,6 @@ ISR(INT0_vect) {
 	// Toggle boolean
 	GICR = (0 << INT0); 
 	clockSet = !clockSet;	
-	_delay_ms(500); //Wait for button to reset to neutral before enabling INT0, can change to while loop
+	_delay_ms(500); //Wait for button to reset to neutral before enabling INT0
 	GICR |= (1 << INT0); //Turn interrupt flag on - counters debouncing
 }
