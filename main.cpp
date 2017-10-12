@@ -6,19 +6,21 @@
  */ 
 
 #define F_CPU 1000000UL
-#define _A 0x1B
-#define _B 0x18
-#define _C 0x15
-#define _D 0x12
+
+#define BIT_TST(REG, bit, val)			( (REG & (1UL << (bit) ) ) == ((val) << (bit)) )
 
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <avr/sleep.h>
 #include <util/delay.h>
+#include "Rotary.h"
 
 void init();
+void LED_on_hours(uint8_t h);
 static volatile uint8_t second, minute, hour;
 static volatile uint8_t second_ones, second_tens, minute_ones, minute_tens;
+static volatile bool clockSet = false;
+Rotary rotaryStep = Rotary();
 
 int main(void)
 {	
@@ -37,12 +39,39 @@ int main(void)
 		 * this by doing a dummy write to the TCCR2B register
 		 * and waiting until the ASSR register reports that TC2
 		 * has been updated, before going to sleep*/
-
+			
 		/* Dummy write the desired pre-scaler */
 		TCCR2 |= ((1 << CS20) | (0 << CS21) | (1 << CS22));
 
 		// Wait until TC2 is updated
 		while (ASSR & ((1 << TCN2UB) | (1 << OCR2UB) | (1 << TCR2UB))) {}
+		
+		while (clockSet) {
+			unsigned char rotaryResult = rotaryStep.process(&PINC);
+			if (rotaryResult) {
+				if ((rotaryResult) == DIR_CW) {
+					if (minute == 00) {
+						minute = 59;
+						if (hour == 0) {
+							hour = 23;
+						} else	hour--;
+					} else minute--;
+				} else {
+					minute++;
+					if (minute == 60) {
+						minute = 0;
+						hour++;
+						if (hour == 24) hour = 0;
+					}				
+				}
+			}
+		
+			minute_ones = minute % 10;
+			minute_tens = minute / 10;
+			PORTB = ((minute_ones << 0) | (minute_tens << 4));
+
+			LED_on_hours((hour));
+		}
     }
 }
 
@@ -54,11 +83,11 @@ void init(void) {
 
 	DDRA = 0b11111111;
 	DDRB = 0b00111111;
-	DDRC = 0x00;;
+	DDRC = 0x00;
 	DDRD = 0b11110000;
 
 	// Activate pull up resistors
-	PORTC = 0xFF;
+	PORTC = 0x00;
 	PORTD = 0b00001111;
 
 	// Wait for external clock crystal to stabilize
@@ -73,7 +102,7 @@ void init(void) {
 	// Make sure all TC0 interrupts are disabled
 	TIMSK = 0x00;
 
-	// set Timer/counter2 to be asynch from the CPU clock
+	// set Timer/counter2 to be async from the CPU clock
 	// This will clock TC2 from the external 32,768 kHz crystal
 	ASSR |= (1 << AS2);
 	
@@ -106,11 +135,15 @@ void init(void) {
 	sleep_enable();
 }
 
+void LED_on_hours(uint8_t h) {
+
+		if (h == 0) PORTD = ((12 << 4) | (15 << 0));
+		else if (h > 12) PORTD = (((h-12) << 4) | (15 << 0));
+		else PORTD = ((h << 4) | (15 << 0));
+
+}
+
 ISR(TIMER2_OVF_vect) {
-	
-	// PORTA ^= 0xFF;
-	// PORTB ^= 0xFF;	
-	// PORTD ^= 0b11110000;
 
 	second++;
 	if (second == 60) {
@@ -124,33 +157,16 @@ ISR(TIMER2_OVF_vect) {
 			}
 		}
 	}
-	
-	second_ones = second % 10; //1s
-	second_tens = second / 10; //10s
 
-	minute_ones = minute % 10;
-	minute_tens = minute / 10;
-	
-	// Bit-shift magic :)
-	PORTA = ((second_ones << 0) | (second_tens << 4));
-	PORTB = ((minute_ones << 0) | (minute_tens << 4));
-	
-	if (hour == 0) PORTD = ((12 << 4) | (15 << 0));
-	else if (hour > 12) PORTD = (((hour-12) << 4) | (15 << 0));
-	else PORTD = ((hour << 4) | (15 << 0));	
+	PORTB = minute;	
+	LED_on_hours(hour);
 	
 }
 
 ISR(INT0_vect) {
-
-	// Enable adjust minutes and hours
-
-
-	PORTB = 0x00;
-
-	for (int i = 0; i < 5 ; i ++) {		
-		PORTB ^= 0b01111111;
-		_delay_ms(500);
-	}
-	
+	// Toggle boolean
+	GICR = (0 << INT0); 
+	clockSet = !clockSet;	
+	_delay_ms(500); //Wait for button to reset to neutral before enabling INT0
+	GICR |= (1 << INT0); //Turn interrupt flag on - counters debouncing
 }
