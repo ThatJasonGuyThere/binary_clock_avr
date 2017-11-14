@@ -18,7 +18,6 @@
 void init();
 void LED_on_hours(uint8_t h);
 static volatile uint8_t second, minute, hour;
-static volatile uint8_t second_ones, second_tens, minute_ones, minute_tens;
 static volatile bool clockSet = false;
 Rotary rotaryStep = Rotary();
 
@@ -49,6 +48,7 @@ int main(void)
 		while (clockSet) {
 			unsigned char rotaryResult = rotaryStep.process(&PINC);
 			if (rotaryResult) {
+				
 				if ((rotaryResult) == DIR_CW) {
 					if (minute == 00) {
 						minute = 59;
@@ -62,14 +62,11 @@ int main(void)
 						minute = 0;
 						hour++;
 						if (hour == 24) hour = 0;
-					}				
+					}			
 				}
 			}
-		
-			minute_ones = minute % 10;
-			minute_tens = minute / 10;
-			PORTB = ((minute_ones << 0) | (minute_tens << 4));
-
+			
+			PORTB = (minute | 1 << 6);
 			LED_on_hours((hour));
 		}
     }
@@ -81,13 +78,14 @@ void init(void) {
 	minute = 0;
 	hour = 0;
 
-	DDRA = 0b11111111;
-	DDRB = 0b00111111;
+	DDRA = 0b00000000;
+	DDRB = 0b01111111;
 	DDRC = 0x00;
 	DDRD = 0b11110000;
 
 	// Activate pull up resistors
-	PORTC = 0x00;
+	PORTA = 0xFF;
+	PORTC = 0xFF;
 	PORTD = 0b00001111;
 
 	// Wait for external clock crystal to stabilize
@@ -98,6 +96,9 @@ void init(void) {
 			asm volatile("nop");
 		}
 	}
+
+	PORTB = (minute | 1 << 6);	// turn on the ampersand at all times
+	LED_on_hours(hour);
 
 	// Make sure all TC0 interrupts are disabled
 	TIMSK = 0x00;
@@ -144,9 +145,11 @@ void LED_on_hours(uint8_t h) {
 }
 
 ISR(TIMER2_OVF_vect) {
-
+	
+	bool updateLED = false;
 	second++;
 	if (second == 60) {
+		updateLED = true;
 		second = 0;
 		minute++;
 		if (minute == 60) {
@@ -158,8 +161,11 @@ ISR(TIMER2_OVF_vect) {
 		}
 	}
 
-	PORTB = minute;	
-	LED_on_hours(hour);
+	if (updateLED) {
+		PORTB = (minute | 1 << 6);	// turn on the ampersand at all times
+		LED_on_hours(hour);
+	}
+	
 	
 }
 
