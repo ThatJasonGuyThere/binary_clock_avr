@@ -76,7 +76,7 @@ void init(void) {
 	
 	second = 0;
 	minute = 0;
-	hour = 0;
+	hour = 12;
 
 	DDRA = 0b00000000;
 	DDRB = 0b01111111;
@@ -142,6 +142,7 @@ void LED_on_hours(uint8_t h) {
 		else if (h > 12) PORTD = (((h-12) << 4) | (15 << 0));
 		else PORTD = ((h << 4) | (15 << 0));
 
+
 }
 
 ISR(TIMER2_OVF_vect) {
@@ -161,7 +162,11 @@ ISR(TIMER2_OVF_vect) {
 		}
 	}
 
-	if (updateLED) {
+	if (hour > 22 || hour < 7) {
+		PORTB = 0x00;
+		PORTD = ((0 << 4) | (15 << 0));
+	}
+	else {
 		PORTB = (minute | 1 << 6);	// turn on the ampersand at all times
 		LED_on_hours(hour);
 	}
